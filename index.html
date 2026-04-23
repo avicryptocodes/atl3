@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ATL · Market Analyser</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="main.css" />
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- LOGIN SCREEN -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-bg-grid"></div>
+    <div class="login-radial"></div>
+    <div class="login-card">
+      <div class="login-logo">
+        <span class="logo-atl">ATL</span>
+        <span class="logo-dot">·</span>
+        <span class="logo-name">Market Analyser</span>
+      </div>
+      <p class="login-subtitle">Institutional-Grade Market Intelligence</p>
+      <div class="login-form">
+        <div class="input-group">
+          <label class="input-label">USERNAME</label>
+          <input type="text" id="login-user" class="atl-input" placeholder="Enter username" autocomplete="off" />
+        </div>
+        <div class="input-group">
+          <label class="input-label">PASSWORD</label>
+          <input type="password" id="login-pass" class="atl-input" placeholder="Enter password" />
+        </div>
+        <div id="login-error" class="login-error hidden">Invalid credentials. Try again.</div>
+        <button id="login-btn" class="btn-primary btn-full" onclick="ATL.login()">
+          <span>ENTER SYSTEM</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+      </div>
+      <div class="login-footer">
+        <span class="muted">AlphaTradersLabs · Proprietary System</span>
+        <span class="muted">v2.1.0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- MAIN APP SHELL -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <div id="app-shell" class="app-shell hidden">
+
+    <!-- ── TOP BAR ──────────────────────────────────────── -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-logo">
+          <span class="logo-atl">ATL</span>
+          <span class="logo-dot">·</span>
+          <span class="logo-name">Market Analyser</span>
+        </div>
+        <div class="version-badge">v2.1.0</div>
+      </div>
+      <div class="topbar-center">
+        <div class="topbar-market-strip" id="topbar-strip">
+          <span class="strip-item"><span class="strip-label">BTC</span><span class="strip-price" id="strip-btc">—</span></span>
+          <span class="strip-divider"></span>
+          <span class="strip-item"><span class="strip-label">ETH</span><span class="strip-price" id="strip-eth">—</span></span>
+          <span class="strip-divider"></span>
+          <span class="strip-item"><span class="strip-label">DOMINANCE</span><span class="strip-price" id="strip-dom">—</span></span>
+          <span class="strip-divider"></span>
+          <span class="strip-item"><span class="strip-label">MARKET</span><span class="strip-price" id="strip-total">—</span></span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="tz-badge" id="tz-badge">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/><path d="M8 4v4l2.5 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <span id="tz-label">UTC+0</span>
+          <span id="tz-time">00:00:00</span>
+        </div>
+        <button class="btn-ghost btn-sm" onclick="ATL.logout()">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          LOGOUT
+        </button>
+      </div>
+    </header>
+
+    <!-- ── LAYOUT BODY ───────────────────────────────────── -->
+    <div class="layout-body">
+
+      <!-- ── LEFT SIDEBAR ─────────────────────────────── -->
+      <nav class="sidebar" id="sidebar">
+        <div class="sidebar-section-label">ANALYSIS</div>
+        <button class="nav-item active" id="nav-single" onclick="ATL.switchView('single')">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="5" height="5" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="5" height="5" stroke="currentColor" stroke-width="1.2"/><rect x="2" y="9" width="5" height="5" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="9" width="5" height="5" stroke="currentColor" stroke-width="1.2"/></svg>
+          Single Asset
+          <span class="nav-badge" id="badge-single"></span>
+        </button>
+        <button class="nav-item" id="nav-market" onclick="ATL.switchView('market')">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 12l3-4 3 2 3-5 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Full Market Scan
+          <span class="nav-badge" id="badge-market"></span>
+        </button>
+
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-section-label">RESULTS</div>
+
+        <button class="nav-item" id="nav-longs" onclick="ATL.switchView('longs')" disabled>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Long Setups
+          <span class="nav-count green" id="count-longs">0</span>
+        </button>
+        <button class="nav-item" id="nav-shorts" onclick="ATL.switchView('shorts')" disabled>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Short Setups
+          <span class="nav-count red" id="count-shorts">0</span>
+        </button>
+        <button class="nav-item" id="nav-watchlist" onclick="ATL.switchView('watchlist')" disabled>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2l1.5 3 3.5.5-2.5 2.5.6 3.5L8 10l-3.1 1.5.6-3.5L3 5.5l3.5-.5z" stroke="currentColor" stroke-width="1.2"/></svg>
+          Watch Only
+          <span class="nav-count amber" id="count-watch">0</span>
+        </button>
+
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-section-label">SYSTEM</div>
+
+        <div class="sidebar-status">
+          <div class="status-row">
+            <span class="status-dot green"></span>
+            <span class="status-label">Binance FAPI</span>
+          </div>
+          <div class="status-row">
+            <span class="status-dot green" id="dot-bybit"></span>
+            <span class="status-label">Bybit V5</span>
+          </div>
+          <div class="status-row">
+            <span class="status-dot green" id="dot-cg"></span>
+            <span class="status-label">CoinGecko</span>
+          </div>
+        </div>
+
+        <div class="sidebar-footer">
+          <span>AlphaTradersLabs</span>
+          <span class="muted">Prop Trading Only</span>
+        </div>
+      </nav>
+
+      <!-- ── MAIN CONTENT AREA ─────────────────────────── -->
+      <main class="content-area" id="content-area">
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- VIEW: SINGLE ASSET ANALYSIS -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="view-single" class="view active">
+
+          <!-- Single Asset Input Panel -->
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Single Asset Analysis</h1>
+              <p class="view-sub">Full top-down SMC analysis + derivatives intelligence</p>
+            </div>
+          </div>
+
+          <div class="input-panel">
+            <div class="input-panel-row">
+              <div class="ticker-input-wrap">
+                <span class="ticker-prefix">PERP</span>
+                <input type="text" id="single-ticker" class="ticker-input" placeholder="BTC" maxlength="12" onkeydown="if(event.key==='Enter')ATL.runSingleAnalysis()" />
+                <span class="ticker-suffix">USDT</span>
+              </div>
+              <div class="tf-selector" id="single-tf-selector">
+                <span class="tf-label">EXECUTION TF</span>
+                <div class="tf-buttons">
+                  <button class="tf-btn" data-tf="1">1M</button>
+                  <button class="tf-btn" data-tf="5">5M</button>
+                  <button class="tf-btn active" data-tf="15">15M</button>
+                  <button class="tf-btn" data-tf="30">30M</button>
+                  <button class="tf-btn" data-tf="60">1H</button>
+                  <button class="tf-btn" data-tf="120">2H</button>
+                  <button class="tf-btn" data-tf="240">4H</button>
+                  <button class="tf-btn" data-tf="360">6H</button>
+                  <button class="tf-btn" data-tf="720">12H</button>
+                  <button class="tf-btn" data-tf="D">1D</button>
+                  <button class="tf-btn" data-tf="3D">3D</button>
+                  <button class="tf-btn" data-tf="W">1W</button>
+                </div>
+              </div>
+              <button class="btn-primary" id="single-run-btn" onclick="ATL.runSingleAnalysis()">
+                <span>RUN ANALYSIS</span>
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M4 3l9 5-9 5V3z" fill="currentColor"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Results Container -->
+          <div id="single-results" class="results-container">
+            <!-- Idle state -->
+            <div id="single-idle" class="idle-state">
+              <div class="idle-icon">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><rect x="8" y="8" width="14" height="14" stroke="var(--green)" stroke-width="1.5"/><rect x="26" y="8" width="14" height="14" stroke="var(--muted)" stroke-width="1.5"/><rect x="8" y="26" width="14" height="14" stroke="var(--muted)" stroke-width="1.5"/><rect x="26" y="26" width="14" height="14" stroke="var(--muted)" stroke-width="1.5"/></svg>
+              </div>
+              <p class="idle-title">Enter a ticker to begin</p>
+              <p class="idle-sub">Type a coin ticker (e.g. BTC, ETH, SOL) and select your execution timeframe</p>
+            </div>
+
+            <!-- Loading state -->
+            <div id="single-loading" class="loading-state hidden">
+              <div class="loading-ticker" id="loading-ticker-name">BTCUSDT</div>
+              <div class="loading-steps" id="loading-steps">
+                <div class="loading-step" id="ls-ohlcv">
+                  <div class="ls-icon pending" id="ls-ohlcv-icon">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/></svg>
+                  </div>
+                  <span class="ls-text">Fetching OHLCV — Weekly / Daily / 4H / 1H / Execution TF</span>
+                </div>
+                <div class="loading-step" id="ls-deriv">
+                  <div class="ls-icon pending" id="ls-deriv-icon">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/></svg>
+                  </div>
+                  <span class="ls-text">Fetching Funding Rate + OI History + Taker Ratio</span>
+                </div>
+                <div class="loading-step" id="ls-meta">
+                  <div class="ls-icon pending" id="ls-meta-icon">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/></svg>
+                  </div>
+                  <span class="ls-text">Fetching Asset Meta — Volume / Market Cap / Liquidity Tier</span>
+                </div>
+                <div class="loading-step" id="ls-structure">
+                  <div class="ls-icon pending" id="ls-structure-icon">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/></svg>
+                  </div>
+                  <span class="ls-text">Computing Top-Down Structure — Weekly → Daily → 4H → 1H → Exec TF</span>
+                </div>
+                <div class="loading-step" id="ls-zones">
+                  <div class="ls-icon pending" id="ls-zones-icon">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/></svg>
+                  </div>
+                  <span class="ls-text">Mapping OB / FVG Zones + Liquidity Clusters</span>
+                </div>
+                <div class="loading-step" id="ls-session">
+                  <div class="ls-icon pending" id="ls-session-icon">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/></svg>
+                  </div>
+                  <span class="ls-text">Detecting AMD Phase + Session + Kill Zone Status</span>
+                </div>
+                <div class="loading-step" id="ls-trade">
+                  <div class="ls-icon pending" id="ls-trade-icon">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/></svg>
+                  </div>
+                  <span class="ls-text">Generating Trade Plan — Entry / SL / TP1 / TP2 / TP3 / Runner</span>
+                </div>
+                <div class="loading-step" id="ls-score">
+                  <div class="ls-icon pending" id="ls-score-icon">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/></svg>
+                  </div>
+                  <span class="ls-text">Running 16-Point Confluence Scoring + Conflict Resolution</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Analysis output — injected by JS -->
+            <div id="single-output" class="hidden"></div>
+          </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- VIEW: FULL MARKET SCAN -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="view-market" class="view hidden">
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Full Market Scan</h1>
+              <p class="view-sub">Scan all Binance Perpetuals — detect longs, shorts and watch setups</p>
+            </div>
+          </div>
+
+          <!-- Market Scan Setup Panel -->
+          <div id="market-setup-panel" class="input-panel">
+            <div class="input-panel-row wrap">
+              <div class="tf-selector">
+                <span class="tf-label">SCAN TIMEFRAME</span>
+                <div class="tf-buttons">
+                  <button class="tf-btn" data-tf="5">5M</button>
+                  <button class="tf-btn active" data-tf="15">15M</button>
+                  <button class="tf-btn" data-tf="30">30M</button>
+                  <button class="tf-btn" data-tf="60">1H</button>
+                  <button class="tf-btn" data-tf="120">2H</button>
+                  <button class="tf-btn" data-tf="240">4H</button>
+                  <button class="tf-btn" data-tf="360">6H</button>
+                  <button class="tf-btn" data-tf="720">12H</button>
+                  <button class="tf-btn" data-tf="D">1D</button>
+                  <button class="tf-btn" data-tf="3D">3D</button>
+                  <button class="tf-btn" data-tf="W">1W</button>
+                </div>
+              </div>
+              <div class="market-filter-row">
+                <div class="filter-group">
+                  <span class="tf-label">MIN SCORE</span>
+                  <select class="atl-select" id="scan-min-score">
+                    <option value="6">6+ (Watch)</option>
+                    <option value="8" selected>8+ (Solid)</option>
+                    <option value="10">10+ (Strong)</option>
+                    <option value="12">12+ (A Grade)</option>
+                    <option value="14">14+ (A+)</option>
+                  </select>
+                </div>
+                <div class="filter-group">
+                  <span class="tf-label">SCAN DEPTH</span>
+                  <select class="atl-select" id="scan-depth">
+                    <option value="ALL" selected>Full Market</option>
+                    <option value="200">Top 200</option>
+                    <option value="100">Top 100</option>
+                    <option value="50">Top 50</option>
+                    <option value="20">Top 20</option>
+                  </select>
+                </div>
+                <div class="filter-group">
+                  <span class="tf-label">DIRECTION</span>
+                  <select class="atl-select" id="scan-direction">
+                    <option value="both" selected>Both</option>
+                    <option value="long">Longs Only</option>
+                    <option value="short">Shorts Only</option>
+                  </select>
+                </div>
+              </div>
+              <button class="btn-primary" id="market-run-btn" onclick="ATL.startMarketScan()">
+                <span>SCAN MARKET</span>
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 12l3-4 3 2 3-5 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Confirm Modal -->
+          <div id="scan-confirm-modal" class="modal-overlay hidden">
+            <div class="modal-card">
+              <div class="modal-icon">
+                <svg width="36" height="36" viewBox="0 0 36 36" fill="none"><path d="M18 8v12M18 26v2" stroke="var(--gold)" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="18" r="15" stroke="var(--gold)" stroke-width="1.5"/></svg>
+              </div>
+              <h2 class="modal-title">Full Market Scan</h2>
+              <p class="modal-body">This will scan <strong id="scan-symbol-count">—</strong> perpetual contracts across all timeframe layers. It fetches OHLCV, derivatives data, and runs the full SMC analysis engine for every coin.</p>
+              <p class="modal-note">⏱ This may take 2–5 minutes. Grab a coffee while we load up.</p>
+              <div class="modal-actions">
+                <button class="btn-ghost" onclick="ATL.cancelScan()">CANCEL</button>
+                <button class="btn-primary" onclick="ATL.confirmScan()">LET'S GO</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Market Scan Progress -->
+          <div id="market-progress-panel" class="hidden">
+            <div class="scan-header-row">
+              <div class="scan-title-block">
+                <span class="scan-phase-label" id="scan-phase-label">INITIALIZING</span>
+                <span class="scan-progress-text" id="scan-progress-text">0 / 0</span>
+              </div>
+              <button class="btn-ghost btn-sm" id="scan-cancel-btn" onclick="ATL.abortScan()">ABORT</button>
+            </div>
+            <div class="progress-bar-wrap">
+              <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+            </div>
+            <div class="scan-log" id="scan-log"></div>
+            <div class="scan-live-grid" id="scan-live-grid"></div>
+          </div>
+
+          <!-- Market Scan Results -->
+          <div id="market-results" class="hidden"></div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- VIEW: LONG SETUPS -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="view-longs" class="view hidden">
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Long Setups <span class="count-pill green" id="longs-count-title">0</span></h1>
+              <p class="view-sub">With-trend and counter-trend bullish setups detected in last scan</p>
+            </div>
+          </div>
+          <div id="longs-content" class="setup-grid">
+            <div class="no-scan-msg">Run a market scan to populate results.</div>
+          </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- VIEW: SHORT SETUPS -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="view-shorts" class="view hidden">
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Short Setups <span class="count-pill red" id="shorts-count-title">0</span></h1>
+              <p class="view-sub">With-trend and counter-trend bearish setups detected in last scan</p>
+            </div>
+          </div>
+          <div id="shorts-content" class="setup-grid">
+            <div class="no-scan-msg">Run a market scan to populate results.</div>
+          </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- VIEW: WATCH ONLY -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="view-watchlist" class="view hidden">
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Watch Only <span class="count-pill amber" id="watch-count-title">0</span></h1>
+              <p class="view-sub">Setups forming but not yet triggering — monitor for entry</p>
+            </div>
+          </div>
+          <div id="watch-content" class="setup-grid">
+            <div class="no-scan-msg">Run a market scan to populate results.</div>
+          </div>
+        </section>
+
+      </main><!-- /content-area -->
+    </div><!-- /layout-body -->
+  </div><!-- /app-shell -->
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- SETUP DETAIL DRAWER                                     -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <div id="detail-drawer-overlay" class="detail-overlay hidden" onclick="ATL.closeDetailDrawer()"></div>
+  <aside id="detail-drawer" class="detail-drawer hidden">
+    <div class="detail-drawer-header">
+      <div class="detail-drawer-title-block">
+        <span id="drawer-ticker" class="drawer-ticker"></span>
+        <span id="drawer-direction-badge" class="drawer-dir-badge"></span>
+      </div>
+      <button class="drawer-close-btn" onclick="ATL.closeDetailDrawer()">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 4l10 10M14 4L4 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div id="detail-drawer-body" class="detail-drawer-body"></div>
+  </aside>
+
+  <script src="main.js"></script>
+</body>
+</html>
