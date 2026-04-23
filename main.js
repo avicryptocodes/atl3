@@ -1846,14 +1846,24 @@ const ATL = (() => {
 
       // Coins with score >= 5 but below minScore go to watch
       const watchMinScore = Math.max(4, minScore - 3);
+      const watchTotal = filtered.length;
+      let watchDone = 0;
+      _log(`Phase 4 — checking ${watchTotal} symbols for watch setups (score ${watchMinScore}–${minScore-1})...`);
+
       for(let i = 0; i < filtered.length; i += BATCH) {
         if(STATE.scanAborted) break;
         const batch = filtered.slice(i, i + BATCH);
+        const pct4 = Math.round(92 + (i / watchTotal) * 5); // 92→97%
+        _setProgress(pct4, `Watch scan: ${Math.min(i + BATCH, watchTotal)} / ${watchTotal}`);
+        _setPhase(`PHASE 4 — WATCH SCAN (${Math.min(i + BATCH, watchTotal)} / ${watchTotal})`);
+
         await Promise.allSettled(batch.map(async item => {
+          if(STATE.scanAborted) return;
           const alreadyFound = STATE.scanResults.longs.some(r=>r.symbol===item.symbol) ||
                                 STATE.scanResults.shorts.some(r=>r.symbol===item.symbol);
-          if(alreadyFound) return;
+          if(alreadyFound) { watchDone++; return; }
           try {
+            _log(`⏳ Checking ${item.symbol.replace('USDT','')} for watch setup...`);
             const ohlcvData = await _fetchAllOHLCV_scan(item.symbol, tf);
             const derivData = await _fetchDerivatives(item.symbol);
             const structureData = _computeTopDownStructure(ohlcvData, tf);
@@ -1867,8 +1877,14 @@ const ATL = (() => {
               const curPrice = execCandles.length ? execCandles[execCandles.length-1].close : 0;
               STATE.scanResults.watch.push({ symbol:item.symbol, vol24h:item.vol24h, tf, curPrice, tradePlan, score, structureData, zoneData, sessionData, derivInterp:_interpretDerivatives(derivData) });
               _addLiveChip(item.symbol, score.total, 'watch');
+              _log(`⭐ WATCH: ${item.symbol} — Score ${score.total}/${score.maxScore} (${score.grade})`, 'warn');
+            } else {
+              _log(`  ↳ ${item.symbol.replace('USDT','')} — score ${score.total} / valid: ${tradePlan.valid} → skip`);
             }
-          } catch(e) {}
+          } catch(e) {
+            _log(`  ↳ ${item.symbol.replace('USDT','')} — fetch error: ${e.message||'unknown'}`, 'warn');
+          }
+          watchDone++;
         }));
         await _sleep(500);
       }
@@ -1920,7 +1936,17 @@ const ATL = (() => {
     document.getElementById('progress-bar').style.width = '0%';
     document.getElementById('scan-progress-text').textContent = '0 / 0';
     document.getElementById('scan-log').innerHTML = '';
-    document.getElementById('scan-live-grid').innerHTML = '';
+    const grid = document.getElementById('scan-live-grid');
+    grid.innerHTML = '';
+
+    // Single delegated listener — re-attached each scan so we don't accumulate listeners
+    if(STATE._chipClickHandler) grid.removeEventListener('click', STATE._chipClickHandler);
+    STATE._chipClickHandler = (e) => {
+      const chip = e.target.closest('.scan-live-chip[data-symbol]');
+      if(!chip) return;
+      openSetupDetail(chip.dataset.symbol, chip.dataset.tf);
+    };
+    grid.addEventListener('click', STATE._chipClickHandler);
   }
 
   function _setProgress(pct, label) {
@@ -1948,6 +1974,9 @@ const ATL = (() => {
     if(!grid) return;
     const chip = document.createElement('div');
     chip.className = `scan-live-chip ${type}-chip`;
+    chip.dataset.symbol = symbol;
+    chip.dataset.tf     = STATE.marketScanTF;
+    chip.title = 'Click to view detail';
     chip.innerHTML = `<span class="chip-ticker" style="color:${type==='long'?'var(--green)':type==='short'?'var(--red)':'var(--gold)'}">${symbol.replace('USDT','')}</span><span class="chip-score">${score}/16</span>`;
     grid.appendChild(chip);
   }
@@ -2080,357 +2109,12 @@ const ATL = (() => {
     </div>`;
   }
 
-  /* ═══════════════════════════════════════════════════════
-     SETUP DETAIL DRAWER
-     Opens a right-side drawer with the full analysis report
-     built directly from already-stored scan result data —
-     no re-fetch required.
-  ═══════════════════════════════════════════════════════ */
+  /* ── Setup Detail — opens single analysis for that coin ── */
   function openSetupDetail(symbol, tf) {
-    // Find the stored result across all three buckets
-    const all = [
-      ...STATE.scanResults.longs.map(r => ({ ...r, _cardType: 'long' })),
-      ...STATE.scanResults.shorts.map(r => ({ ...r, _cardType: 'short' })),
-      ...STATE.scanResults.watch.map(r => ({ ...r, _cardType: 'watch' }))
-    ];
-    const r = all.find(x => x.symbol === symbol && x.tf === tf);
-    if(!r) return; // safety guard
-
-    const ticker  = symbol.replace('USDT','');
-    const cardType = r._cardType;
-    const { curPrice, tradePlan, score, structureData, zoneData, sessionData, derivInterp, conflict } = r;
-    const isLong  = tradePlan.direction === 'LONG';
-    const isShort = tradePlan.direction === 'SHORT';
-
-    /* ── Header ─────────────────────────────────────────── */
-    document.getElementById('drawer-ticker').textContent = ticker + ' · ' + _tfLabel(tf);
-    const badge = document.getElementById('drawer-direction-badge');
-    badge.textContent  = isLong ? '🟢 LONG' : isShort ? '🔴 SHORT' : '⭕ WATCH';
-    badge.className    = 'drawer-dir-badge ' + (isLong ? 'badge-long' : isShort ? 'badge-short' : 'badge-watch');
-
-    /* ── Build body HTML ────────────────────────────────── */
-    const sc          = score.scoreColor;
-    const maxScore    = score.maxScore;
-    const pct         = score.total / maxScore;
-    const circumference = 283; // 2π × r45
-    const dashOffset  = circumference * (1 - pct);
-    const conflictLabel = (conflict?.verdict||'MIXED').replace('_ALIGNED','').replace('_',' ');
-
-    const riskClass = score.total >= 12 ? 'risk-full' : score.total >= 8 ? 'risk-half' : 'risk-reduce';
-    const riskLabel = score.total >= 12 ? '1% — Full Risk · All Models' : score.total >= 8 ? '0.5% — Half Risk · Model 2 Only' : '0.25% — Reduced · Confirmation Only';
-
-    let html = '';
-
-    /* ── 1. Score Ring ─────────────────────────────────── */
-    html += `
-    <div class="drawer-score-block">
-      <div class="score-ring-wrap">
-        <svg width="110" height="110" viewBox="0 0 110 110">
-          <circle class="score-ring-track" cx="55" cy="55" r="45"/>
-          <circle class="score-ring-fill" id="drawer-ring-fill" cx="55" cy="55" r="45"
-            stroke="${sc}" stroke-dasharray="${circumference}" stroke-dashoffset="${circumference}"/>
-        </svg>
-        <div class="score-ring-center">
-          <span class="score-ring-num" style="color:${sc}">${score.total}</span>
-          <span class="score-ring-denom">/ ${maxScore}</span>
-          <span class="score-ring-grade" style="color:${sc}">${score.grade}</span>
-        </div>
-      </div>
-      <div class="drawer-score-bars">
-        <div class="drawer-section-title">CONFLUENCE BREAKDOWN</div>
-        ${Object.entries(score.breakdown).map(([k,v]) => `
-        <div class="score-bar-row">
-          <span class="score-bar-label">${k}</span>
-          <div class="score-bar-track">
-            <div class="score-bar-fill" style="width:${(v.score/v.max)*100}%;background:${v.score===v.max?'var(--green)':v.score>0?'var(--gold)':'var(--red)'}"></div>
-          </div>
-          <span class="score-bar-val">${v.score}/${v.max}</span>
-        </div>`).join('')}
-        <div style="margin-top:6px;">
-          <span class="risk-pill ${riskClass}">${riskLabel}</span>
-        </div>
-      </div>
-    </div>`;
-
-    /* ── 2. Price + Session quick stats ─────────────────── */
-    html += `
-    <div>
-      <div class="drawer-section-title">MARKET SNAPSHOT</div>
-      <div class="drawer-info-grid">
-        <div class="drawer-info-cell">
-          <div class="dic-label">PRICE</div>
-          <div class="dic-value">$${_fmt(curPrice, curPrice > 1 ? 2 : 6)}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">TIMEFRAME</div>
-          <div class="dic-value">${_tfLabel(tf)}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">OVERALL BIAS</div>
-          <div class="dic-value" style="color:${isLong?'var(--green)':isShort?'var(--red)':'var(--gold)'}">${conflictLabel}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">AMD PHASE</div>
-          <div class="dic-value" style="font-size:11px">${sessionData.amdPhase}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">SESSION</div>
-          <div class="dic-value" style="font-size:11px">${sessionData.currentSession}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">KILL ZONE</div>
-          <div class="dic-value" style="color:${sessionData.killZoneActiveNow?'var(--green)':'var(--muted)'}">${sessionData.killZoneActiveNow?'✅ ACTIVE':'⭕ INACTIVE'}</div>
-        </div>
-      </div>
-    </div>`;
-
-    /* ── 3. Trade Plan ───────────────────────────────────── */
-    if(tradePlan.valid) {
-      html += `
-      <div>
-        <div class="drawer-section-title">TRADE PLAN — ${tradePlan.setupType || ''} · ${tradePlan.entryModel || ''}</div>
-        <div class="drawer-trade-levels">
-          <div class="drawer-level-row" style="border-left:2px solid var(--blue);background:rgba(64,169,255,0.05)">
-            <span class="dl-label">ENTRY</span>
-            <span class="dl-price" style="color:var(--blue)">$${tradePlan.entry}</span>
-            <span class="dl-action">CE of exec TF FVG</span>
-            <span class="dl-rr" style="margin-left:auto">ATR $${tradePlan.atr}</span>
-          </div>
-          <div class="drawer-level-row" style="border-left:2px solid var(--red)">
-            <span class="dl-label">STOP LOSS</span>
-            <span class="dl-price" style="color:var(--red)">$${tradePlan.sl}</span>
-            <span class="dl-action">Risk $${tradePlan.riskPips}</span>
-          </div>
-          <div class="drawer-level-row" style="border-left:2px solid rgba(255,68,68,0.4)">
-            <span class="dl-label">INVALIDATION</span>
-            <span class="dl-price" style="color:var(--red);font-size:10px">$${tradePlan.invalidation}</span>
-            <span class="dl-action">Body close beyond</span>
-          </div>
-          <div class="drawer-level-row" style="border-left:2px solid var(--green)">
-            <span class="dl-label">TP1</span>
-            <span class="dl-price" style="color:var(--green)">$${tradePlan.tp1}</span>
-            <span class="dl-rr">${tradePlan.rr1}R</span>
-            <span class="dl-action" style="margin-left:auto;font-size:9px">${tradePlan.actions?.atTP1||''}</span>
-          </div>
-          <div class="drawer-level-row" style="border-left:2px solid var(--green)">
-            <span class="dl-label">TP2</span>
-            <span class="dl-price" style="color:var(--green)">$${tradePlan.tp2}</span>
-            <span class="dl-rr">${tradePlan.rr2}R</span>
-            <span class="dl-action" style="margin-left:auto;font-size:9px">${tradePlan.actions?.atTP2||''}</span>
-          </div>
-          <div class="drawer-level-row" style="border-left:2px solid var(--green)">
-            <span class="dl-label">TP3</span>
-            <span class="dl-price" style="color:var(--green)">$${tradePlan.tp3}</span>
-            <span class="dl-rr">${tradePlan.rr3}R</span>
-            <span class="dl-action" style="margin-left:auto;font-size:9px">${tradePlan.actions?.atTP3||''}</span>
-          </div>
-          <div class="drawer-level-row" style="border-left:2px solid var(--gold)">
-            <span class="dl-label">RUNNER</span>
-            <span class="dl-price" style="color:var(--gold)">$${tradePlan.runner}</span>
-            <span class="dl-rr" style="color:var(--gold)">${tradePlan.rrR}R</span>
-            <span class="dl-action" style="margin-left:auto;font-size:9px">${tradePlan.actions?.runner||''}</span>
-          </div>
-        </div>
-        ${tradePlan.obstacles?.length ? `
-        <div style="margin-top:8px;padding:10px 12px;background:rgba(255,68,68,0.05);border:1px solid rgba(255,68,68,0.15);">
-          <div style="font-family:var(--font-head);font-size:8px;font-weight:700;letter-spacing:0.1em;color:var(--red);margin-bottom:6px;">OBSTACLE MAP</div>
-          ${tradePlan.obstacles.slice(0,4).map((o,i)=>`
-          <div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:10px;font-family:var(--font-mono);">
-            <span style="color:var(--muted)">#${i+1}</span>
-            <span style="flex:1;color:var(--sub)">${o.label} — $${_p(o.price)}</span>
-            <span style="font-family:var(--font-head);font-size:8px;font-weight:700;color:${i===0?'var(--red)':'var(--muted)'}">${i===0?'FIRST BARRIER':'BARRIER'}</span>
-          </div>`).join('')}
-        </div>` : ''}
-        ${tradePlan.invalidationRules?.length ? `
-        <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;">
-          ${tradePlan.invalidationRules.map(r=>`<div style="font-size:10px;color:var(--sub);font-family:var(--font-mono);padding:3px 8px;background:var(--bg3);">⚠ ${r}</div>`).join('')}
-        </div>` : ''}
-      </div>`;
-    }
-
-    /* ── 4. Derivatives ──────────────────────────────────── */
-    html += `
-    <div>
-      <div class="drawer-section-title">DERIVATIVES INTELLIGENCE</div>
-      <div class="drawer-info-grid">
-        <div class="drawer-info-cell">
-          <div class="dic-label">FUNDING RATE</div>
-          <div class="dic-value" style="color:${derivInterp.fundingColor||'var(--text)'}">${derivInterp.fundingRate||'—'}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">NEXT FUNDING</div>
-          <div class="dic-value">${derivInterp.nextFunding||'—'}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">OI TREND (24H)</div>
-          <div class="dic-value" style="color:${derivInterp.oiChange&&parseFloat(derivInterp.oiChange)>0?'var(--green)':'var(--red)'}">${derivInterp.oiTrend||'—'}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">TAKER VOL RATIO</div>
-          <div class="dic-value" style="color:${derivInterp.takerColor||'var(--text)'}">${derivInterp.takerBias||'—'}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">L/S RATIO</div>
-          <div class="dic-value">${derivInterp.lsState||'—'}</div>
-        </div>
-        <div class="drawer-info-cell">
-          <div class="dic-label">VERDICT</div>
-          <div class="dic-value" style="font-size:10px;color:${(derivInterp.verdict||'').includes('GENUINE')?'var(--green)':(derivInterp.verdict||'').includes('RISK')?'var(--red)':'var(--gold)'}">${derivInterp.verdict||'—'}</div>
-        </div>
-      </div>
-    </div>`;
-
-    /* ── 5. TF Alignment ────────────────────────────────── */
-    if(structureData?._conflict?.table?.length) {
-      html += `
-      <div>
-        <div class="drawer-section-title">TIMEFRAME ALIGNMENT</div>
-        <div style="display:flex;flex-direction:column;gap:1px;">
-          ${structureData._conflict.table.map(row => {
-            const icon = row.status==='ok' ? '✅' : row.status==='warn' ? '⚠️' : '🔻';
-            const col  = row.status==='ok' ? 'var(--green)' : row.status==='warn' ? 'var(--gold)' : 'var(--red)';
-            return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--bg3);font-size:11px;font-family:var(--font-mono);">
-              <span style="font-family:var(--font-head);font-size:9px;font-weight:700;letter-spacing:0.07em;color:var(--muted);width:36px;">${row.tf}</span>
-              <span style="flex:1;color:${col}">${row.bias}</span>
-              <span>${icon}</span>
-            </div>`;
-          }).join('')}
-        </div>
-        <div style="margin-top:4px;padding:8px 12px;background:var(--bg3);font-size:10px;font-family:var(--font-mono);color:var(--sub);">
-          VERDICT: <span style="color:${structureData._conflict.avg>0?'var(--green)':'var(--red)'}">${conflictLabel}</span>
-          &nbsp;·&nbsp; Pullback: ${structureData._pullback?.fib||'—'} (${structureData._pullback?.type||'—'})
-        </div>
-      </div>`;
-    }
-
-    /* ── 6. Key Levels + Liquidity ──────────────────────── */
-    const dStruct = structureData?.['D'] || {};
-    const wStruct = structureData?.['W'] || {};
-    const bslAbove = zoneData?.bsl?.filter(l => l.price > curPrice && !l.swept).slice(0,4) || [];
-    const sslBelow = zoneData?.ssl?.filter(l => l.price < curPrice && !l.swept).slice(0,4) || [];
-
-    html += `
-    <div>
-      <div class="drawer-section-title">KEY LEVELS</div>
-      <div class="drawer-info-grid">
-        ${dStruct.pdh ? `<div class="drawer-info-cell"><div class="dic-label">PDH</div><div class="dic-value" style="color:var(--red)">$${_p(dStruct.pdh)}</div></div>` : ''}
-        ${dStruct.pdl ? `<div class="drawer-info-cell"><div class="dic-label">PDL</div><div class="dic-value" style="color:var(--green)">$${_p(dStruct.pdl)}</div></div>` : ''}
-        ${wStruct.pwh||wStruct.pdh ? `<div class="drawer-info-cell"><div class="dic-label">PWH</div><div class="dic-value" style="color:var(--red)">$${_p(wStruct.pwh||wStruct.pdh)}</div></div>` : ''}
-        ${wStruct.pwl||wStruct.pdl ? `<div class="drawer-info-cell"><div class="dic-label">PWL</div><div class="dic-value" style="color:var(--green)">$${_p(wStruct.pwl||wStruct.pdl)}</div></div>` : ''}
-      </div>
-    </div>`;
-
-    if(bslAbove.length || sslBelow.length) {
-      html += `
-      <div>
-        <div class="drawer-section-title">LIQUIDITY MAP</div>
-        <div style="display:flex;flex-direction:column;gap:1px;">
-          ${bslAbove.map(l=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg3);font-size:10px;font-family:var(--font-mono);">
-            <span style="color:var(--red)">▲</span><span style="flex:1;color:var(--sub)">${l.label}</span><span>$${_p(l.price)}</span>
-          </div>`).join('')}
-          <div style="padding:4px 12px;font-size:9px;font-family:var(--font-head);font-weight:700;letter-spacing:0.07em;color:var(--muted);background:var(--bg2);">── PRICE $${_fmt(curPrice, curPrice>1?2:6)} ──</div>
-          ${sslBelow.map(l=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg3);font-size:10px;font-family:var(--font-mono);">
-            <span style="color:var(--green)">▼</span><span style="flex:1;color:var(--sub)">${l.label}</span><span>$${_p(l.price)}</span>
-          </div>`).join('')}
-        </div>
-      </div>`;
-    }
-
-    /* ── 7. OBs + FVGs ──────────────────────────────────── */
-    const relevantOBs  = (zoneData?.ob||[]).filter(z=>z.state!=='BROKEN').slice(0,5);
-    const openFVGs     = (zoneData?.fvg||[]).filter(f=>f.state==='OPEN').slice(0,5);
-
-    if(relevantOBs.length) {
-      html += `
-      <div>
-        <div class="drawer-section-title">ORDER BLOCKS</div>
-        <div style="display:flex;flex-direction:column;gap:1px;">
-          ${relevantOBs.map(ob => {
-            const isActive = curPrice >= ob.low && curPrice <= ob.high;
-            const col = ob.type==='demand' ? 'var(--green)' : 'var(--red)';
-            const tagClass = ob.state==='FRESH' ? 'tag-fresh' : ob.state==='TAPPED' ? 'tag-tapped' : 'tag-swept';
-            return `<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;background:${isActive?'rgba(64,169,255,0.06)':'var(--bg3)'};border-left:2px solid ${col};font-size:10px;font-family:var(--font-mono);">
-              <span style="flex:1;color:${col}">${ob.label}</span>
-              <span style="color:var(--sub)">${_p(ob.low)} – ${_p(ob.high)}</span>
-              <span class="level-tag ${tagClass}">${ob.state}</span>
-              ${isActive ? '<span style="font-size:8px;color:var(--blue);font-family:var(--font-head);font-weight:700">▶ IN</span>' : ''}
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }
-
-    if(openFVGs.length) {
-      html += `
-      <div>
-        <div class="drawer-section-title">FAIR VALUE GAPS (OPEN)</div>
-        <div style="display:flex;flex-direction:column;gap:1px;">
-          ${openFVGs.map(fvg => {
-            const isActive = curPrice >= fvg.low && curPrice <= fvg.high;
-            const col = fvg.type==='bull' ? 'var(--green)' : 'var(--red)';
-            return `<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;background:${isActive?'rgba(64,169,255,0.06)':'var(--bg3)'};border-left:2px solid ${col};font-size:10px;font-family:var(--font-mono);">
-              <span style="flex:1;color:${col}">${fvg.label}</span>
-              <span style="color:var(--sub)">${_p(fvg.low)} – ${_p(fvg.high)}</span>
-              <span style="color:var(--muted)">CE $${_p(fvg.mid)}</span>
-              ${isActive ? '<span style="font-size:8px;color:var(--blue);font-family:var(--font-head);font-weight:700">▶ IN</span>' : ''}
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }
-
-    /* ── 8. Open Full Analysis button ───────────────────── */
-    html += `
-    <div style="padding-top:4px;padding-bottom:8px;">
-      <button class="btn-primary" style="width:100%" onclick="ATL.closeDetailDrawer();ATL.openFullAnalysis('${symbol}','${tf}')">
-        OPEN FULL SINGLE ANALYSIS →
-      </button>
-    </div>`;
-
-    /* ── Inject & open ──────────────────────────────────── */
-    document.getElementById('detail-drawer-body').innerHTML = html;
-
-    const overlay = document.getElementById('detail-drawer-overlay');
-    const drawer  = document.getElementById('detail-drawer');
-    overlay.classList.remove('hidden');
-    drawer.classList.remove('hidden');
-    // Force reflow so the CSS transition fires
-    drawer.getBoundingClientRect();
-    drawer.classList.add('open');
-
-    // Animate the ring after a short delay (DOM must be painted first)
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const fill = document.getElementById('drawer-ring-fill');
-        if(fill) fill.style.strokeDashoffset = String(Math.round(circumference * (1 - pct)));
-      });
-    });
-
-    // Close on Escape
-    STATE._drawerEscHandler = (e) => { if(e.key === 'Escape') closeDetailDrawer(); };
-    document.addEventListener('keydown', STATE._drawerEscHandler);
-  }
-
-  function closeDetailDrawer() {
-    const overlay = document.getElementById('detail-drawer-overlay');
-    const drawer  = document.getElementById('detail-drawer');
-    drawer.classList.remove('open');
-    setTimeout(() => {
-      drawer.classList.add('hidden');
-      overlay.classList.add('hidden');
-      document.getElementById('detail-drawer-body').innerHTML = '';
-    }, 300);
-    if(STATE._drawerEscHandler) {
-      document.removeEventListener('keydown', STATE._drawerEscHandler);
-      STATE._drawerEscHandler = null;
-    }
-  }
-
-  // Full re-fetch analysis for the coin (called from drawer CTA)
-  function openFullAnalysis(symbol, tf) {
     switchView('single');
     const ticker = symbol.replace('USDT','');
     document.getElementById('single-ticker').value = ticker;
+    // Match TF button
     document.querySelectorAll('#single-tf-selector .tf-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.tf === tf);
     });
@@ -2517,7 +2201,7 @@ const ATL = (() => {
     login, logout, switchView,
     runSingleAnalysis,
     startMarketScan, cancelScan, confirmScan, abortScan,
-    openSetupDetail, closeDetailDrawer, openFullAnalysis
+    openSetupDetail
   };
 
 })();
