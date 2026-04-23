@@ -985,8 +985,13 @@ const ATL = (() => {
       // Cap TP at nearest supply
       const supply = zones._nearestSupply;
       if(supply) {
+        // For LONG: higher price = better. TP1 is capped downward if it reaches into supply zone.
         if(tp1 >= supply.low) tp1 = supply.low * 0.999;
-        if(tp2 >= supply.low) tp2 = supply.low * 0.999;
+        // TP2 is only capped if it also sits inside supply. If capping collapses it to TP1, reset to natural 4R.
+        if(tp2 >= supply.low) {
+          const capped = supply.low * 0.999;
+          tp2 = (capped <= tp1) ? entry + riskPips * 4 : capped;
+        }
         runner = supply.high > tp3 ? supply.high * 0.998 : tp3 + riskPips;
       } else {
         runner = tp3 + riskPips * 2;
@@ -1012,8 +1017,14 @@ const ATL = (() => {
 
       const demand = zones._nearestDemand;
       if(demand) {
+        // For SHORT: lower price = better. TP1 is capped upward to demand.high if it reaches into demand zone.
         if(tp1 <= demand.high) tp1 = demand.high * 1.001;
-        if(tp2 <= demand.high) tp2 = demand.high * 1.001;
+        // TP2 is only capped if it also sits inside the demand zone (tp2 <= demand.high).
+        // But if capping it would make it equal to TP1 (no separation), reset it to natural 4R instead.
+        if(tp2 <= demand.high) {
+          const capped = demand.high * 1.001;
+          tp2 = (capped >= tp1) ? entry - riskPips * 4 : capped;
+        }
         runner = demand.low < tp3 ? demand.low * 1.002 : tp3 - riskPips;
       } else {
         runner = tp3 - riskPips * 2;
@@ -1846,24 +1857,14 @@ const ATL = (() => {
 
       // Coins with score >= 5 but below minScore go to watch
       const watchMinScore = Math.max(4, minScore - 3);
-      const watchTotal = filtered.length;
-      let watchDone = 0;
-      _log(`Phase 4 — checking ${watchTotal} symbols for watch setups (score ${watchMinScore}–${minScore-1})...`);
-
       for(let i = 0; i < filtered.length; i += BATCH) {
         if(STATE.scanAborted) break;
         const batch = filtered.slice(i, i + BATCH);
-        const pct4 = Math.round(92 + (i / watchTotal) * 5); // 92→97%
-        _setProgress(pct4, `Watch scan: ${Math.min(i + BATCH, watchTotal)} / ${watchTotal}`);
-        _setPhase(`PHASE 4 — WATCH SCAN (${Math.min(i + BATCH, watchTotal)} / ${watchTotal})`);
-
         await Promise.allSettled(batch.map(async item => {
-          if(STATE.scanAborted) return;
           const alreadyFound = STATE.scanResults.longs.some(r=>r.symbol===item.symbol) ||
                                 STATE.scanResults.shorts.some(r=>r.symbol===item.symbol);
-          if(alreadyFound) { watchDone++; return; }
+          if(alreadyFound) return;
           try {
-            _log(`⏳ Checking ${item.symbol.replace('USDT','')} for watch setup...`);
             const ohlcvData = await _fetchAllOHLCV_scan(item.symbol, tf);
             const derivData = await _fetchDerivatives(item.symbol);
             const structureData = _computeTopDownStructure(ohlcvData, tf);
@@ -1877,14 +1878,8 @@ const ATL = (() => {
               const curPrice = execCandles.length ? execCandles[execCandles.length-1].close : 0;
               STATE.scanResults.watch.push({ symbol:item.symbol, vol24h:item.vol24h, tf, curPrice, tradePlan, score, structureData, zoneData, sessionData, derivInterp:_interpretDerivatives(derivData) });
               _addLiveChip(item.symbol, score.total, 'watch');
-              _log(`⭐ WATCH: ${item.symbol} — Score ${score.total}/${score.maxScore} (${score.grade})`, 'warn');
-            } else {
-              _log(`  ↳ ${item.symbol.replace('USDT','')} — score ${score.total} / valid: ${tradePlan.valid} → skip`);
             }
-          } catch(e) {
-            _log(`  ↳ ${item.symbol.replace('USDT','')} — fetch error: ${e.message||'unknown'}`, 'warn');
-          }
-          watchDone++;
+          } catch(e) {}
         }));
         await _sleep(500);
       }
@@ -1936,17 +1931,7 @@ const ATL = (() => {
     document.getElementById('progress-bar').style.width = '0%';
     document.getElementById('scan-progress-text').textContent = '0 / 0';
     document.getElementById('scan-log').innerHTML = '';
-    const grid = document.getElementById('scan-live-grid');
-    grid.innerHTML = '';
-
-    // Single delegated listener — re-attached each scan so we don't accumulate listeners
-    if(STATE._chipClickHandler) grid.removeEventListener('click', STATE._chipClickHandler);
-    STATE._chipClickHandler = (e) => {
-      const chip = e.target.closest('.scan-live-chip[data-symbol]');
-      if(!chip) return;
-      openSetupDetail(chip.dataset.symbol, chip.dataset.tf);
-    };
-    grid.addEventListener('click', STATE._chipClickHandler);
+    document.getElementById('scan-live-grid').innerHTML = '';
   }
 
   function _setProgress(pct, label) {
@@ -1974,9 +1959,6 @@ const ATL = (() => {
     if(!grid) return;
     const chip = document.createElement('div');
     chip.className = `scan-live-chip ${type}-chip`;
-    chip.dataset.symbol = symbol;
-    chip.dataset.tf     = STATE.marketScanTF;
-    chip.title = 'Click to view detail';
     chip.innerHTML = `<span class="chip-ticker" style="color:${type==='long'?'var(--green)':type==='short'?'var(--red)':'var(--gold)'}">${symbol.replace('USDT','')}</span><span class="chip-score">${score}/16</span>`;
     grid.appendChild(chip);
   }
