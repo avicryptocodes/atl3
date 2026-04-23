@@ -985,13 +985,8 @@ const ATL = (() => {
       // Cap TP at nearest supply
       const supply = zones._nearestSupply;
       if(supply) {
-        // For LONG: higher price = better. TP1 is capped downward if it reaches into supply zone.
         if(tp1 >= supply.low) tp1 = supply.low * 0.999;
-        // TP2 is only capped if it also sits inside supply. If capping collapses it to TP1, reset to natural 4R.
-        if(tp2 >= supply.low) {
-          const capped = supply.low * 0.999;
-          tp2 = (capped <= tp1) ? entry + riskPips * 4 : capped;
-        }
+        if(tp2 >= supply.low) tp2 = supply.low * 0.999;
         runner = supply.high > tp3 ? supply.high * 0.998 : tp3 + riskPips;
       } else {
         runner = tp3 + riskPips * 2;
@@ -1017,14 +1012,8 @@ const ATL = (() => {
 
       const demand = zones._nearestDemand;
       if(demand) {
-        // For SHORT: lower price = better. TP1 is capped upward to demand.high if it reaches into demand zone.
         if(tp1 <= demand.high) tp1 = demand.high * 1.001;
-        // TP2 is only capped if it also sits inside the demand zone (tp2 <= demand.high).
-        // But if capping it would make it equal to TP1 (no separation), reset it to natural 4R instead.
-        if(tp2 <= demand.high) {
-          const capped = demand.high * 1.001;
-          tp2 = (capped >= tp1) ? entry - riskPips * 4 : capped;
-        }
+        if(tp2 <= demand.high) tp2 = demand.high * 1.001;
         runner = demand.low < tp3 ? demand.low * 1.002 : tp3 - riskPips;
       } else {
         runner = tp3 - riskPips * 2;
@@ -1223,7 +1212,7 @@ const ATL = (() => {
     const derivInterp = _interpretDerivatives(derivData);
     const tier = _getLiqTier(metaData?.volume24h, metaData?.rank);
 
-    let html = `<div class="analysis-output">`;
+    let html = `<div class="analysis-output" id="analysis-output-block">`;
 
     /* ── A. Asset Header ─────────────────────────────────── */
     html += `
@@ -1578,6 +1567,27 @@ const ATL = (() => {
 
     html += `</div>`; // end analysis-output
 
+    /* ── I. Signal Panel + Copy Button ──────────────────────
+       Only rendered for valid trade setups                  */
+    if(tradePlan.valid) {
+      // Store report on window so copySignal() can access it
+      window._ATL_lastReport = r;
+      html += `
+      <div class="signal-panel" id="signal-panel">
+        <div class="signal-panel-header">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-family:var(--font-head);font-size:9px;font-weight:700;letter-spacing:0.12em;color:var(--green)">📡 ATL SIGNAL</span>
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--muted)">${symbol} · ${_tfLabel(tf)} · ${score.grade} Grade · ${score.total}/${score.maxScore}</span>
+          </div>
+          <button class="btn-copy-signal" id="copy-signal-btn" onclick="ATL.copySignal()">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M3 11H2a1 1 0 01-1-1V2a1 1 0 011-1h8a1 1 0 011 1v1" stroke="currentColor" stroke-width="1.4"/></svg>
+            COPY SIGNAL
+          </button>
+        </div>
+        <pre class="signal-preview" id="signal-preview">${_escHtml(_buildSignalText(r))}</pre>
+      </div>`;
+    }
+
     document.getElementById('single-loading').classList.add('hidden');
     const out = document.getElementById('single-output');
     out.innerHTML = html;
@@ -1591,6 +1601,148 @@ const ATL = (() => {
       <span class="level-value" style="color:${color}">$${_p(price)}</span>
       <span class="level-tag ${tagClass}">${label.includes('CURRENT') ? 'LIVE' : 'KEY'}</span>
     </div>`;
+  }
+
+  /* ─────────────────────────────────────────────────────────
+     SIGNAL TEXT BUILDER + COPY
+  ───────────────────────────────────────────────────────── */
+  function _buildSignalText(r) {
+    const { symbol, tf, ohlcvData, derivData, structureData, zoneData, sessionData, tradePlan, score } = r;
+    const execCandles  = ohlcvData[tf] || [];
+    const curPrice     = execCandles.length ? execCandles[execCandles.length-1].close : 0;
+    const derivInterp  = _interpretDerivatives(derivData);
+    const conflict     = structureData._conflict;
+    const conflictLabel = conflict.verdict.replace('_ALIGNED','').replace('_',' ');
+    const isLong       = tradePlan.direction === 'LONG';
+    const dirEmoji     = isLong ? '📈' : '📉';
+    const sep          = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
+    const sep2         = '━━━';
+
+    // HTF alignment summary (top 3 TFs only)
+    const htfRows = conflict.table.filter(r => ['W','1D','4H','1H'].includes(r.tf)).slice(0,4);
+    const htfLine = htfRows.map(r => `${r.tf} ${r.bias.replace('(CHoCH)','±')}`).join(' · ') || '—';
+
+    // Near FVG for entry zone
+    const nearFVG = isLong
+      ? zoneData.fvg.find(f => f.type==='bull' && f.high >= curPrice * 0.97 && f.high <= curPrice * 1.03)
+      : zoneData.fvg.find(f => f.type==='bear' && f.low  <= curPrice * 1.03 && f.low  >= curPrice * 0.97);
+
+    // Swept liquidity context
+    const sweptSSL = zoneData.ssl.filter(s => s.swept).slice(-1)[0];
+    const sweptBSL = zoneData.bsl.filter(s => s.swept).slice(-1)[0];
+    const sweptLine = isLong
+      ? (sweptSSL ? `✅ SSL swept — stop hunt complete, longs cleared` : '⚠️ No SSL swept — wait for sweep confirmation')
+      : (sweptBSL ? `✅ BSL swept — stop hunt complete, shorts cleared` : '⚠️ No BSL swept — wait for sweep confirmation');
+
+    // Deriv summary
+    const fundingVal = derivInterp.fundingRate || '—';
+    const oiVal      = derivInterp.oiTrend     || '—';
+    const lsVal      = derivInterp.lsState     || '—';
+    const derivVerdict = derivInterp.verdict   || '—';
+
+    // Score breakdown one-liner
+    const breakdownLine = Object.entries(score.breakdown)
+      .map(([k,v]) => `${k} ${v.score}/${v.max}`)
+      .join(' · ');
+
+    // Risk allocation
+    const risk = score.total >= 12 ? '1% — Full Risk' : score.total >= 8 ? '0.5% — Half Risk' : '0.25% — Reduced';
+
+    // HTF resistance
+    const htfResText = tradePlan.htfResistance?.length
+      ? `⚠️ HTF resistance: ${tradePlan.htfResistance.join(' | ')}`
+      : `✅ No major HTF resistance blocking path to TP1`;
+
+    // Obstacle map (top 3)
+    const obstacleLines = (tradePlan.obstacles || []).slice(0,3)
+      .map((o,i) => `  ${i===0?'🔶':'🔸'} ${o.label} — $${_p(o.price)}`)
+      .join('\n');
+
+    // Invalidation rules
+    const invLines = (tradePlan.invalidationRules || [])
+      .filter(Boolean)
+      .map(r => `  ❌ ${r}`)
+      .join('\n');
+
+    const now = new Date();
+    const ts  = now.toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}) + ' UTC';
+
+    let txt = '';
+    txt += `${sep}\n`;
+    txt += `📡 ATL SIGNAL — AlphaTradersLabs\n`;
+    txt += `${sep}\n`;
+    txt += `🪙 ${symbol}  |  ${_tfLabel(tf)}  |  Score: ${score.total}/${score.maxScore} (${score.grade})\n`;
+    txt += `${dirEmoji} SIGNAL: ${tradePlan.direction}\n`;
+    txt += `📊 Bias: ${conflictLabel}  |  AMD: ${sessionData.amdPhase}\n`;
+    txt += `${sessionData.killZoneActiveNow ? '🔥 Kill Zone ACTIVE\n' : ''}`;
+    txt += `\n${sep2} EXECUTION PLAN ${sep2}\n`;
+    txt += `📍 Entry:      $${tradePlan.entry}  (${tradePlan.entryModel})\n`;
+    txt += `🛑 Stop Loss:  $${tradePlan.sl}  (Risk: $${tradePlan.riskPips})\n`;
+    txt += `❌ Invalidate: $${tradePlan.invalidation}  (body close beyond)\n`;
+    txt += `🎯 TP1:        $${tradePlan.tp1}  (${tradePlan.rr1}R)\n`;
+    txt += `🎯 TP2:        $${tradePlan.tp2}  (${tradePlan.rr2}R)\n`;
+    txt += `🎯 TP3:        $${tradePlan.tp3}  (${tradePlan.rr3}R)\n`;
+    txt += `🏃 Runner:     $${tradePlan.runner}  (${tradePlan.rrR}R)\n`;
+    txt += `⚖️ Setup Type: ${tradePlan.setupType}  |  ATR: $${tradePlan.atr}\n`;
+    txt += `\n${sep2} HTF ALIGNMENT ${sep2}\n`;
+    txt += `${htfLine}\n`;
+    if(nearFVG) {
+      txt += `\n${sep2} ENTRY ZONE ${sep2}\n`;
+      txt += `${isLong?'🟢':'🔴'} FVG: $${_p(nearFVG.low)} – $${_p(nearFVG.high)}  (CE: $${_p(nearFVG.mid)})\n`;
+    }
+    if(obstacleLines) {
+      txt += `\n${sep2} OBSTACLES TO TP3 ${sep2}\n`;
+      txt += obstacleLines + '\n';
+    }
+    txt += `\n${sep2} LIQUIDITY ${sep2}\n`;
+    txt += `${sweptLine}\n`;
+    txt += `\n${sep2} DERIVATIVES ${sep2}\n`;
+    txt += `📈 Funding:   ${fundingVal}\n`;
+    txt += `📊 OI Trend:  ${oiVal}\n`;
+    txt += `👥 L/S Ratio: ${lsVal}\n`;
+    txt += `⚡ Verdict:   ${derivVerdict}\n`;
+    txt += `\n${sep2} CONFLUENCE ${sep2}\n`;
+    txt += `${breakdownLine}\n`;
+    if(invLines) {
+      txt += `\n${sep2} INVALIDATION RULES ${sep2}\n`;
+      txt += invLines + '\n';
+    }
+    txt += `${htfResText}\n`;
+    txt += `\n${sep2} RISK ${sep2}\n`;
+    txt += `💰 ${risk}\n`;
+    txt += `\n${sep}\n`;
+    txt += `⚠️  Not financial advice. Validate before trading.\n`;
+    txt += `Powered by ATL · AlphaTradersLabs  |  ${ts}\n`;
+    txt += sep;
+
+    return txt;
+  }
+
+  function _escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function copySignal() {
+    const r = window._ATL_lastReport;
+    if(!r) return;
+    const text = _buildSignalText(r);
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.getElementById('copy-signal-btn');
+      if(!btn) return;
+      const orig = btn.innerHTML;
+      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> COPIED!`;
+      btn.style.color = 'var(--green)';
+      btn.style.borderColor = 'rgba(0,230,118,0.4)';
+      setTimeout(() => {
+        btn.innerHTML = orig;
+        btn.style.color = '';
+        btn.style.borderColor = '';
+      }, 2000);
+    }).catch(() => {
+      // Fallback for browsers without clipboard API
+      const pre = document.getElementById('signal-preview');
+      if(pre) { const range = document.createRange(); range.selectNode(pre); window.getSelection().removeAllRanges(); window.getSelection().addRange(range); }
+    });
   }
 
   /* ─────────────────────────────────────────────────────────
